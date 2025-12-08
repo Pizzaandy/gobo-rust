@@ -1,15 +1,14 @@
 use crate::chunked_index_vec::ChunkedIndexVec;
 use crate::lex::token::{Token, TokenIndex};
+use crate::parser::ParseDiagnostic;
 use crate::source_text::TextSize;
 use crate::typed_index;
-
-type Error = &'static str;
 
 pub struct TokenizedText {
     pub tokens: ChunkedIndexVec<Token, TokenIndex>,
     pub comments: ChunkedIndexVec<Comment, CommentIndex>,
     pub lines: ChunkedIndexVec<Line, LineIndex>,
-    pub diagnostics: Vec<Error>,
+    pub diagnostics: Vec<ParseDiagnostic>,
     pub last_line_is_inserted: bool,
 }
 
@@ -67,6 +66,28 @@ impl TokenizedText {
         (self.get_line_number(token), self.get_column_number(token))
     }
 
+    pub fn has_leading_whitespace(&self, token: TokenIndex) -> bool {
+        self.tokens.get(token).has_leading_space()
+    }
+
+    pub fn has_trailing_whitespace(&self, token: TokenIndex) -> bool {
+        self.tokens.get(token + 1).has_leading_space()
+    }
+
+    pub fn get_leading_line_breaks(&self, token: TokenIndex) -> u32 {
+        if !self.has_leading_whitespace(token) {
+            return 0;
+        }
+        self.get_line_number(token) - self.get_line_number(token - 1)
+    }
+
+    pub fn get_trailing_line_breaks(&self, token: TokenIndex) -> u32 {
+        if !self.has_trailing_whitespace(token) {
+            return 0;
+        }
+        self.get_line_number(token + 1) - self.get_line_number(token)
+    }
+
     pub fn dump(&self) {
         for (index, token) in self.tokens.iter() {
             let (line, col) = self.get_loc(index);
@@ -93,6 +114,12 @@ impl Comment {
     pub fn end(&self) -> TextSize {
         self.end
     }
+}
+
+pub enum CommentKind {
+    OwnLine,
+    EndOfLine,
+    Remaining,
 }
 
 pub struct Line {

@@ -28,7 +28,7 @@ impl<T, I: TypedIndex> ChunkedIndexVec<T, I> {
             self.chunks.push(Chunk::new());
         }
 
-        self.chunks[chunk_index].add(value);
+        self.chunks[chunk_index].push(value);
         self.len += 1;
 
         I::from(id)
@@ -120,7 +120,7 @@ impl<T> Chunk<T> {
         }
     }
 
-    pub fn add(&mut self, value: T) {
+    pub fn push(&mut self, value: T) {
         assert!(self.len < Self::capacity());
         unsafe {
             self.ptr

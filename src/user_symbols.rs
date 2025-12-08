@@ -1,9 +1,11 @@
 use crate::chunked_index_vec::ChunkedIndexVec;
+use crate::fnv::Fnv1aHasher32;
 use crate::source_text::TextSpan;
 use crate::typed_index;
 use crate::typed_index::TypedIndex;
 use std::collections::HashMap;
-use std::hash::Hash;
+use std::fmt::Debug;
+use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher, Hash, Hasher};
 
 typed_index!(pub struct IdentifierId(u32));
 typed_index!(pub struct StringLiteralId(u32));
@@ -11,9 +13,9 @@ typed_index!(pub struct NumberLiteralId(u32));
 
 // Storage for unique values like identifiers and literals used during compilation
 pub struct UserSymbols {
-    pub identifiers: UniqueChunkedIndexVec<TextSpan, IdentifierId>,
-    pub string_literals: UniqueChunkedIndexVec<TextSpan, StringLiteralId>,
-    pub number_literals: UniqueChunkedIndexVec<TextSpan, NumberLiteralId>,
+    pub identifiers: UniqueChunkedIndexVec<TextSpan, IdentifierId, Fnv1aHasher32>,
+    pub string_literals: UniqueChunkedIndexVec<TextSpan, StringLiteralId, Fnv1aHasher32>,
+    pub number_literals: UniqueChunkedIndexVec<TextSpan, NumberLiteralId, Fnv1aHasher32>,
 }
 
 impl UserSymbols {
@@ -26,16 +28,22 @@ impl UserSymbols {
     }
 }
 
-pub struct UniqueChunkedIndexVec<T, I: TypedIndex> {
+pub struct UniqueChunkedIndexVec<
+    T: Eq + Hash + Clone,
+    I: TypedIndex,
+    H: Default + Hasher = DefaultHasher,
+> {
     vec: ChunkedIndexVec<T, I>,
-    map: HashMap<T, I>,
+    map: HashMap<T, I, BuildHasherDefault<H>>,
 }
 
-impl<T: Eq + Hash + Clone, I: TypedIndex> UniqueChunkedIndexVec<T, I> {
+impl<T: Eq + Hash + Clone + Debug, I: TypedIndex + Debug, H: Default + Hasher>
+    UniqueChunkedIndexVec<T, I, H>
+{
     pub fn new() -> Self {
         Self {
             vec: ChunkedIndexVec::new(),
-            map: HashMap::new(),
+            map: HashMap::with_hasher(BuildHasherDefault::<H>::default()),
         }
     }
 
@@ -60,5 +68,11 @@ impl<T: Eq + Hash + Clone, I: TypedIndex> UniqueChunkedIndexVec<T, I> {
 
     pub fn iter(&self) -> impl Iterator<Item = (I, &T)> {
         self.vec.iter()
+    }
+
+    pub fn dump(&self) {
+        for (item, key) in self.iter() {
+            println!("{:?}: {:?}", item, key);
+        }
     }
 }

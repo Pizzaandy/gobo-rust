@@ -1,5 +1,6 @@
 use crate::typed_index;
 use std::arch::x86_64::*;
+use std::fmt::{Debug, Formatter};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::ops::Bound;
@@ -21,21 +22,21 @@ impl TextSpan {
     pub fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
+    
+    pub fn to_str(&self) -> &str {
+        unsafe { std::str::from_utf8_unchecked(self.as_slice()) }
+    }
 }
 
 impl Hash for TextSpan {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        const OFFSET: u32 = 2166136261;
-        const PRIME: u32 = 16777619;
+        state.write(self.as_slice());
+    }
+}
 
-        let mut hash = OFFSET;
-
-        for &byte in self.as_slice() {
-            hash ^= byte as u32;
-            hash = hash.wrapping_mul(PRIME);
-        }
-
-        state.write_u32(hash);
+impl Debug for TextSpan {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
     }
 }
 

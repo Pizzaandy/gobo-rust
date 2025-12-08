@@ -30,10 +30,6 @@ impl Token {
         }
     }
 
-    pub fn new_no_payload(kind: TokenKind, has_space: bool, start: TextSize) -> Self {
-        Self::new(kind, has_space, 0, start)
-    }
-
     pub fn kind(&self) -> TokenKind {
         unsafe { std::mem::transmute((self.data & Self::KIND_MASK) as u8) }
     }
