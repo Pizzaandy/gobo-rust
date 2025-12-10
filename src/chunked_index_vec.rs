@@ -121,7 +121,7 @@ impl<T> Chunk<T> {
     }
 
     pub fn push(&mut self, value: T) {
-        assert!(self.len < Self::capacity());
+        debug_assert!(self.len < Self::capacity());
         unsafe {
             self.ptr
                 .as_ptr()

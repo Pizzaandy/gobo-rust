@@ -1,124 +1,101 @@
-use std::num::{NonZeroU8, NonZeroUsize};
 use crate::lex::identifier_lexer::*;
-use crate::lex::number_lexer::{is_digit, scan_number_or_dot};
+use crate::lex::number_lexer::{scan_number_or_dot};
 use crate::lex::string_lexer::{scan_string_literal, scan_verbatim_string_literal};
 use crate::lex::token::{Token, TokenIndex, TokenKind};
 use crate::lex::{Comment, Line, LineIndex, TokenizedText};
 use crate::source_text::{SourceText, TextSize};
-use crate::user_symbols::UserSymbols;
-use phf_macros::phf_map;
-use crate::fnv::fnv1a_32;
-
-static KEYWORDS: phf::Map<&'static [u8], TokenKind> = phf_map! {
-    b"and" => TokenKind::And,
-    b"or" => TokenKind::Or,
-    b"xor" => TokenKind::Xor,
-    b"not" => TokenKind::Not,
-    b"mod" => TokenKind::Modulo,
-    b"div" => TokenKind::IntegerDivide,
-    b"begin" => TokenKind::OpenBrace,
-    b"end" => TokenKind::CloseBrace,
-    b"true" => TokenKind::BooleanLiteral,
-    b"false" => TokenKind::BooleanLiteral,
-    b"break" => TokenKind::Break,
-    b"exit" => TokenKind::Exit,
-    b"do" => TokenKind::Do,
-    b"until" => TokenKind::Until,
-    b"case" => TokenKind::Case,
-    b"else" => TokenKind::Else,
-    b"new" => TokenKind::New,
-    b"var" => TokenKind::Var,
-    b"globalvar" => TokenKind::GlobalVar,
-    b"try" => TokenKind::Try,
-    b"catch" => TokenKind::Catch,
-    b"finally" => TokenKind::Finally,
-    b"return" => TokenKind::Return,
-    b"continue" => TokenKind::Continue,
-    b"for" => TokenKind::For,
-    b"switch" => TokenKind::Switch,
-    b"while" => TokenKind::While,
-    b"repeat" => TokenKind::Repeat,
-    b"function" => TokenKind::Function,
-    b"with" => TokenKind::With,
-    b"default" => TokenKind::Default,
-    b"if" => TokenKind::If,
-    b"then" => TokenKind::Then,
-    b"throw" => TokenKind::Throw,
-    b"delete" => TokenKind::Delete,
-    b"enum" => TokenKind::Enum,
-    b"constructor" => TokenKind::Constructor,
-};
+use crate::parser::ParseDiagnostic;
 
 #[derive(Copy, Clone)]
 #[repr(u8)]
-enum Dispatch {
-    IdentifierStart,
-    CommonSymbolStart,
-    UniqueSymbolStart,
-    NumberOrDot,
-    Quote,
-    At,
-    Dollar,
-    HorizontalWhitespace,
-    CommentOrDivide,
-    Newline,
-    Cr,
+pub enum Dispatch {
     Error,
+    NewLine,
+    Cr,
+    HorizontalSpace,
+    Exclamation,
+    Quote,
+    IdentifierStart,
+    Dollar,
+    Hash,
+    Percent,
+    Ampersand,
+    ParenOpen,
+    ParenClose,
+    Asterisk,
+    Plus,
+    Comma,
+    Minus,
+    Dot,
+    Slash,
+    DigitZero,
+    DigitNonZero,
+    Colon,
+    Semicolon,
+    LessThan,
+    Equal,
+    GreaterThan,
+    Question,
+    At,
+    BracketOpen,
+    BracketClose,
+    Caret,
+    BraceOpen,
+    Pipe,
+    BraceClose,
+    Tilde,
+    Unicode,
 }
 
-const CHAR_COUNT: usize = u8::MAX as usize + 1;
+const CHAR_COUNT: usize = 256;
 
 static DISPATCH_TABLE: [Dispatch; CHAR_COUNT] = {
-    let mut result: [Dispatch; CHAR_COUNT] = [Dispatch::Error; CHAR_COUNT];
+    let mut result = [Dispatch::Error; CHAR_COUNT];
     let mut i = 0;
     while i < CHAR_COUNT {
         let c = i as u8;
         result[i] = match c {
-            b'/' => Dispatch::CommentOrDivide,
-            b'\n' => Dispatch::Newline,
+            b'\n' => Dispatch::NewLine,
             b'\r' => Dispatch::Cr,
-            b'.' => Dispatch::NumberOrDot,
+            b'!' => Dispatch::Exclamation,
             b'"' => Dispatch::Quote,
-            b'@' => Dispatch::At,
             b'$' => Dispatch::Dollar,
-            c if is_digit(c) => Dispatch::NumberOrDot,
+            b'#' => Dispatch::Hash,
+            b'%' => Dispatch::Percent,
+            b'&' => Dispatch::Ampersand,
+            b'(' => Dispatch::ParenOpen,
+            b')' => Dispatch::ParenClose,
+            b'*' => Dispatch::Asterisk,
+            b'+' => Dispatch::Plus,
+            b',' => Dispatch::Comma,
+            b'-' => Dispatch::Minus,
+            b'.' => Dispatch::Dot,
+            b'/' => Dispatch::Slash,
+            b'0' => Dispatch::DigitZero,
+            b'1'..=b'9' => Dispatch::DigitNonZero,
+            b':' => Dispatch::Colon,
+            b';' => Dispatch::Semicolon,
+            b'<' => Dispatch::LessThan,
+            b'=' => Dispatch::Equal,
+            b'>' => Dispatch::GreaterThan,
+            b'?' => Dispatch::Question,
+            b'@' => Dispatch::At,
+            b'[' => Dispatch::BracketOpen,
+            b']' => Dispatch::BracketClose,
+            b'^' => Dispatch::Caret,
+            b'{' => Dispatch::BraceOpen,
+            b'|' => Dispatch::Pipe,
+            b'}' => Dispatch::BraceClose,
+            b'~' => Dispatch::Tilde,
             c if is_identifier_start(c) => Dispatch::IdentifierStart,
-            c if is_common_symbol_start(c) => Dispatch::CommonSymbolStart,
-            c if is_unique_symbol_start(c) => Dispatch::UniqueSymbolStart,
-            c if is_horizontal_whitespace(c) => Dispatch::HorizontalWhitespace,
-            _ => Dispatch::Error,
+            c if is_horizontal_whitespace(c) => Dispatch::HorizontalSpace,
+            0x00..=0x7F => Dispatch::Error,
+            _ => Dispatch::Unicode,
         };
         i += 1;
     }
     result
 };
-
-const fn is_common_symbol_start(c: u8) -> bool {
-    matches!(
-        c,
-        b'>' | b'<'
-            | b'&'
-            | b'|'
-            | b'^'
-            | b'~'
-            | b'+'
-            | b'*'
-            | b'/'
-            | b'%'
-            | b'='
-            | b'!'
-            | b'-'
-            | b'?'
-            | b'['
-    )
-}
-
-const fn is_unique_symbol_start(c: u8) -> bool {
-    matches!(
-        c,
-        b';' | b':' | b',' | b'.' | b'{' | b'}' | b'(' | b')' | b']'
-    )
-}
 
 const fn is_horizontal_whitespace(c: u8) -> bool {
     matches!(c, b' ' | b'\t')
@@ -127,9 +104,9 @@ const fn is_horizontal_whitespace(c: u8) -> bool {
 const fn is_open_delimiter(kind: TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::OpenParen
-            | TokenKind::OpenBrace
-            | TokenKind::OpenBracket
+        TokenKind::ParenOpen
+            | TokenKind::BraceOpen
+            | TokenKind::BracketOpen
             | TokenKind::ArrayAccessor
             | TokenKind::ListAccessor
             | TokenKind::GridAccessor
@@ -141,7 +118,7 @@ const fn is_open_delimiter(kind: TokenKind) -> bool {
 const fn is_close_delimiter(kind: TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::CloseParen | TokenKind::CloseBrace | TokenKind::CloseBracket
+        TokenKind::ParenClose | TokenKind::BraceClose | TokenKind::BracketClose
     )
 }
 
@@ -149,14 +126,14 @@ fn is_matching_delimiter(open_kind: TokenKind, close_kind: TokenKind) -> bool {
     debug_assert!(is_open_delimiter(open_kind));
     debug_assert!(is_close_delimiter(close_kind));
     match open_kind {
-        TokenKind::OpenParen => close_kind == TokenKind::CloseParen,
-        TokenKind::OpenBrace => close_kind == TokenKind::CloseBrace,
-        TokenKind::OpenBracket
+        TokenKind::ParenOpen => close_kind == TokenKind::ParenClose,
+        TokenKind::BraceOpen => close_kind == TokenKind::BraceClose,
+        TokenKind::BracketOpen
         | TokenKind::ArrayAccessor
         | TokenKind::ListAccessor
         | TokenKind::GridAccessor
         | TokenKind::MapAccessor
-        | TokenKind::StructAccessor => close_kind == TokenKind::CloseBracket,
+        | TokenKind::StructAccessor => close_kind == TokenKind::BracketClose,
         _ => panic!("expected an open delimiter"),
     }
 }
@@ -172,7 +149,7 @@ struct Lexer<'a> {
     text: &'a SourceText,
     cursor: TextSize,
     line_index: LineIndex,
-    open_brackets: Vec<TokenIndex>,
+    open_delimiters: Vec<TokenIndex>,
     has_leading_space: bool,
     has_mismatched_brackets: bool,
 }
@@ -184,7 +161,7 @@ impl<'a> Lexer<'a> {
             text,
             cursor: TextSize::from(0),
             line_index: LineIndex::from(0),
-            open_brackets: Vec::new(),
+            open_delimiters: Vec::new(),
             has_leading_space: false,
             has_mismatched_brackets: false,
         }
@@ -201,16 +178,81 @@ impl<'a> Lexer<'a> {
             };
             match byte_kind {
                 Dispatch::IdentifierStart => self.lex_keyword_or_identifier(),
-                Dispatch::CommonSymbolStart => self.lex_common_start_symbol(),
-                Dispatch::UniqueSymbolStart => self.lex_unique_start_symbol(),
-                Dispatch::NumberOrDot => self.lex_number_literal_or_dot(),
+                Dispatch::Dot => self.lex_number_literal_or_dot(),
+                Dispatch::DigitZero => self.lex_number_literal_or_dot(),
+                Dispatch::DigitNonZero => self.lex_number_literal_or_dot(),
                 Dispatch::Quote => self.lex_string_literal(),
                 Dispatch::At => self.lex_verbatim_string_literal(),
                 Dispatch::Dollar => self.lex_template_string_or_hex_literal(),
-                Dispatch::HorizontalWhitespace => self.lex_horizontal_whitespace(),
-                Dispatch::Newline => self.lex_vertical_whitespace(),
+                Dispatch::HorizontalSpace => self.lex_horizontal_whitespace(),
+                Dispatch::NewLine => self.lex_vertical_whitespace(),
                 Dispatch::Cr => self.lex_cr(),
-                Dispatch::CommentOrDivide => self.lex_comment_or_divide(),
+                Dispatch::Slash => self.lex_comment_or_divide(),
+                Dispatch::Hash => todo!("hex literal + directives"),
+
+                Dispatch::BracketOpen => self.lex_accessor(),
+                Dispatch::BracketClose => self.lex_close_delimiter(TokenKind::BracketClose),
+                Dispatch::ParenOpen => self.lex_open_delimiter(TokenKind::ParenOpen),
+                Dispatch::ParenClose => self.lex_close_delimiter(TokenKind::ParenClose),
+                Dispatch::BraceOpen => self.lex_open_delimiter(TokenKind::BraceOpen),
+                Dispatch::BraceClose => self.lex_close_delimiter(TokenKind::BraceClose),
+
+                Dispatch::Comma => self.lex_byte(TokenKind::Comma),
+                Dispatch::Colon => self.lex_byte(TokenKind::Colon),
+                Dispatch::Semicolon => self.lex_byte(TokenKind::Semicolon),
+
+                Dispatch::Exclamation => {
+                    self.lex_byte_and_equals(self.cursor, TokenKind::Not, TokenKind::NotEquals)
+                }
+                Dispatch::Percent => self.lex_byte_and_equals(
+                    self.cursor,
+                    TokenKind::Modulo,
+                    TokenKind::ModuloAssign,
+                ),
+                Dispatch::Caret => self.lex_byte_and_equals(
+                    self.cursor,
+                    TokenKind::BitXor,
+                    TokenKind::BitXorAssign,
+                ),
+                Dispatch::Tilde => self.lex_byte_and_equals(
+                    self.cursor,
+                    TokenKind::BitNot,
+                    TokenKind::BitNotAssign,
+                ),
+                Dispatch::Equal => {
+                    self.lex_byte_and_equals(self.cursor, TokenKind::Equals, TokenKind::Equals)
+                }
+
+                Dispatch::Ampersand => self.lex_byte_twice_or_equals(
+                    TokenKind::BitAnd,
+                    TokenKind::And,
+                    TokenKind::BitAndAssign,
+                ),
+                Dispatch::Asterisk => self.lex_byte_twice_or_equals(
+                    TokenKind::Multiply,
+                    TokenKind::Power,
+                    TokenKind::MultiplyAssign,
+                ),
+                Dispatch::Plus => self.lex_byte_twice_or_equals(
+                    TokenKind::Plus,
+                    TokenKind::PlusPlus,
+                    TokenKind::PlusAssign,
+                ),
+                Dispatch::Minus => self.lex_byte_twice_or_equals(
+                    TokenKind::Minus,
+                    TokenKind::MinusMinus,
+                    TokenKind::MinusAssign,
+                ),
+                Dispatch::Pipe => self.lex_byte_twice_or_equals(
+                    TokenKind::BitOr,
+                    TokenKind::Or,
+                    TokenKind::BitOrAssign,
+                ),
+                Dispatch::LessThan => self.lex_less_than(),
+                Dispatch::GreaterThan => self.lex_greater_than(),
+                Dispatch::Question => self.lex_question(),
+
+                Dispatch::Unicode => todo!("unicode"),
                 Dispatch::Error => self.lex_error(),
             };
         }
@@ -240,6 +282,11 @@ impl<'a> Lexer<'a> {
     }
 
     #[inline(always)]
+    fn current(&self) -> u8 {
+        self.text.get_byte(self.cursor)
+    }
+
+    #[inline(always)]
     fn peek(&self) -> u8 {
         if self.cursor + 1 < self.text.len() {
             self.text.get_byte(self.cursor + 1)
@@ -248,14 +295,85 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    #[inline(always)]
-    fn get_byte(&self, pos: TextSize) -> u8 {
-        self.text.get_byte(pos)
+    #[inline]
+    fn lex_byte(&mut self, kind: TokenKind) {
+        self.add_token(kind, self.cursor);
+        self.cursor += 1;
     }
 
-    #[inline(always)]
-    fn current(&self) -> u8 {
-        self.text.get_byte(self.cursor)
+    #[inline]
+    fn lex_open_delimiter(&mut self, kind: TokenKind) {
+        debug_assert!(is_open_delimiter(kind));
+        let token_index = self.add_token(kind, self.cursor);
+        self.cursor += 1;
+        self.handle_open_delimiter(token_index);
+    }
+
+    #[inline]
+    fn lex_close_delimiter(&mut self, kind: TokenKind) {
+        debug_assert!(is_close_delimiter(kind));
+        let token_index = self.add_token(kind, self.cursor);
+        self.cursor += 1;
+        self.handle_close_delimiter(token_index);
+    }
+
+    #[inline]
+    fn lex_byte_and_equals(&mut self, start: TextSize, kind: TokenKind, equals_kind: TokenKind) {
+        if self.peek() == b'=' {
+            self.cursor += 2;
+            self.add_token(equals_kind, start);
+        } else {
+            self.cursor += 1;
+            self.add_token(kind, start);
+        }
+    }
+
+    #[inline]
+    fn lex_byte_twice_or_equals(
+        &mut self,
+        kind: TokenKind,
+        twice_kind: TokenKind,
+        equals_kind: TokenKind,
+    ) {
+        let start = self.cursor;
+        let start_byte = self.current();
+
+        if self.peek() == b'=' {
+            self.cursor += 2;
+            self.add_token(equals_kind, start);
+        } else if self.peek() == start_byte {
+            self.cursor += 2;
+            self.add_token(twice_kind, start);
+        } else {
+            self.cursor += 1;
+            self.add_token(kind, start);
+        }
+    }
+
+    #[inline]
+    fn handle_open_delimiter(&mut self, open_token_index: TokenIndex) {
+        self.open_delimiters.push(open_token_index);
+    }
+
+    fn handle_close_delimiter(&mut self, close_token_index: TokenIndex) {
+        if let Some(open_token_index) = self.open_delimiters.pop() {
+            // store the matching delimiter in the payload
+            let close_kind: TokenKind;
+            {
+                let close_token = self.output.tokens.get_mut(close_token_index);
+                close_token.set_payload(open_token_index.value());
+                close_kind = close_token.kind();
+            }
+
+            let open_token = self.output.tokens.get_mut(open_token_index);
+            if is_matching_delimiter(open_token.kind(), close_kind) {
+                open_token.set_payload(close_token_index.value());
+            } else {
+                self.has_mismatched_brackets = true;
+            }
+        } else {
+            self.has_mismatched_brackets = true;
+        }
     }
 
     fn lex_file_start(&mut self) {
@@ -352,7 +470,7 @@ impl<'a> Lexer<'a> {
             return;
         }
 
-        let is_lfcr = self.cursor.value() > 0 && self.get_byte(self.cursor - 1) == b'\n';
+        let is_lfcr = self.cursor.value() > 0 && self.text.get_byte(self.cursor - 1) == b'\n';
 
         if is_lfcr {
             self.output
@@ -369,198 +487,9 @@ impl<'a> Lexer<'a> {
         self.cursor += 1;
     }
 
-    fn lex_common_start_symbol(&mut self) {
-        debug_assert!(is_common_symbol_start(self.current()));
-
-        let start = self.cursor;
-        let slice = self.text.get_slice(start..);
-
-        let (kind, len) = match slice[0] {
-            b'>' => {
-                if slice.starts_with(b">>=") {
-                    (TokenKind::RightShiftAssign, 3)
-                } else if slice.starts_with(b">>") {
-                    (TokenKind::RightShift, 2)
-                } else if slice.starts_with(b">=") {
-                    (TokenKind::GreaterThanEquals, 2)
-                } else {
-                    (TokenKind::GreaterThan, 1)
-                }
-            }
-            b'<' => {
-                if slice.starts_with(b"<<=") {
-                    (TokenKind::LeftShiftAssign, 3)
-                } else if slice.starts_with(b"<<") {
-                    (TokenKind::LeftShift, 2)
-                } else if slice.starts_with(b"<=") {
-                    (TokenKind::LessThanEquals, 2)
-                } else {
-                    (TokenKind::LessThan, 1)
-                }
-            }
-            b'&' => {
-                if slice.starts_with(b"&=") {
-                    (TokenKind::BitAndAssign, 2)
-                } else if slice.starts_with(b"&&") {
-                    (TokenKind::And, 2)
-                } else {
-                    (TokenKind::BitAnd, 1)
-                }
-            }
-            b'|' => {
-                if slice.starts_with(b"|=") {
-                    (TokenKind::BitOrAssign, 2)
-                } else {
-                    (TokenKind::BitOr, 1)
-                }
-            }
-            b'^' => {
-                if slice.starts_with(b"^=") {
-                    (TokenKind::BitXorAssign, 2)
-                } else {
-                    (TokenKind::BitXor, 1)
-                }
-            }
-            b'~' => {
-                if slice.starts_with(b"~=") {
-                    (TokenKind::BitNotAssign, 2)
-                } else {
-                    (TokenKind::BitNot, 1)
-                }
-            }
-            b'+' => {
-                if slice.starts_with(b"+=") {
-                    (TokenKind::PlusAssign, 2)
-                } else {
-                    (TokenKind::Plus, 1)
-                }
-            }
-            b'*' => {
-                if slice.starts_with(b"*=") {
-                    (TokenKind::MultiplyAssign, 2)
-                } else {
-                    (TokenKind::Multiply, 1)
-                }
-            }
-            b'/' => {
-                if slice.starts_with(b"/=") {
-                    (TokenKind::DivideAssign, 2)
-                } else {
-                    (TokenKind::Divide, 1)
-                }
-            }
-            b'%' => {
-                if slice.starts_with(b"%=") {
-                    (TokenKind::ModulusAssign, 2)
-                } else {
-                    (TokenKind::Modulo, 1)
-                }
-            }
-            b'=' => {
-                if slice.starts_with(b"==") {
-                    (TokenKind::Equals, 2)
-                } else {
-                    (TokenKind::Assign, 1)
-                }
-            }
-            b'!' => {
-                if slice.starts_with(b"!=") {
-                    (TokenKind::NotEquals, 2)
-                } else {
-                    (TokenKind::Not, 1)
-                }
-            }
-            b'-' => {
-                if slice.starts_with(b"-=") {
-                    (TokenKind::MinusAssign, 2)
-                } else {
-                    (TokenKind::Minus, 1)
-                }
-            }
-            b'?' => {
-                if slice.starts_with(b"??=") {
-                    (TokenKind::NullCoalesceAssign, 3)
-                } else if slice.starts_with(b"??") {
-                    (TokenKind::NullCoalesce, 2)
-                } else {
-                    (TokenKind::QuestionMark, 1)
-                }
-            }
-            b'[' => {
-                if slice.starts_with(b"[|") {
-                    (TokenKind::ListAccessor, 2)
-                } else if slice.starts_with(b"[?") {
-                    (TokenKind::MapAccessor, 2)
-                } else if slice.starts_with(b"[#") {
-                    (TokenKind::GridAccessor, 2)
-                } else if slice.starts_with(b"[@") {
-                    (TokenKind::ArrayAccessor, 2)
-                } else if slice.starts_with(b"[$") {
-                    (TokenKind::StructAccessor, 2)
-                } else {
-                    (TokenKind::OpenBracket, 1)
-                }
-            }
-            _ => {
-                self.lex_error();
-                return;
-            }
-        };
-
-        self.cursor += len;
-
-        let token_index = self.add_token(kind, start);
-
-        if is_open_delimiter(kind) {
-            self.open_brackets.push(token_index);
-        }
-    }
-
-    fn lex_unique_start_symbol(&mut self) {
-        debug_assert!(is_unique_symbol_start(self.current()));
-        let start = self.cursor;
-        let kind = match self.current() {
-            b';' => TokenKind::Semicolon,
-            b':' => TokenKind::Colon,
-            b',' => TokenKind::Comma,
-            b'.' => TokenKind::Dot,
-            b'{' => TokenKind::OpenBrace,
-            b'}' => TokenKind::CloseBrace,
-            b'(' => TokenKind::OpenParen,
-            b')' => TokenKind::CloseParen,
-            b']' => TokenKind::CloseBracket,
-            _ => {
-                self.lex_error();
-                return;
-            }
-        };
-
-        self.cursor += 1;
-
-        if !is_close_delimiter(kind) {
-            self.add_token(kind, start);
-            return;
-        }
-
-        if let Some(open_token_index) = self.open_brackets.pop() {
-            // store the matching delimiter
-            let close_token_index =
-                self.add_token_with_payload(kind, open_token_index.value(), start);
-            let open_token = self.output.tokens.get_mut(open_token_index);
-            if is_matching_delimiter(open_token.kind(), kind) {
-                open_token.set_payload(close_token_index.value());
-            } else {
-                self.has_mismatched_brackets = true;
-            }
-        } else {
-            self.has_mismatched_brackets = true;
-            self.add_token(kind, start);
-        }
-    }
-
     fn lex_keyword_or_identifier(&mut self) {
         let start = self.cursor;
-        if self.get_byte(start) > 0x7F {
+        if self.text.get_byte(start) > 0x7F {
             self.lex_error();
             return;
         }
@@ -568,12 +497,131 @@ impl<'a> Lexer<'a> {
         self.cursor += scan_identifier(self.text.get_slice(self.cursor..));
         let slice = self.text.get_slice(start..self.cursor);
 
-        if let Some(kind) = KEYWORDS.get(slice) {
-            self.add_token(*kind, start);
-            return;
+        let kind = Self::match_keyword(slice);
+        self.add_token(kind, start);
+    }
+
+    fn match_keyword(text: &[u8]) -> TokenKind {
+        match text {
+            b"and" => TokenKind::And,
+            b"or" => TokenKind::Or,
+            b"xor" => TokenKind::Xor,
+            b"not" => TokenKind::Not,
+            b"mod" => TokenKind::Modulo,
+            b"div" => TokenKind::IntegerDivide,
+            b"begin" => TokenKind::BraceOpen,
+            b"end" => TokenKind::BraceClose,
+            b"true" => TokenKind::BooleanLiteral,
+            b"false" => TokenKind::BooleanLiteral,
+            b"break" => TokenKind::Break,
+            b"exit" => TokenKind::Exit,
+            b"do" => TokenKind::Do,
+            b"until" => TokenKind::Until,
+            b"case" => TokenKind::Case,
+            b"else" => TokenKind::Else,
+            b"new" => TokenKind::New,
+            b"var" => TokenKind::Var,
+            b"globalvar" => TokenKind::GlobalVar,
+            b"try" => TokenKind::Try,
+            b"catch" => TokenKind::Catch,
+            b"finally" => TokenKind::Finally,
+            b"return" => TokenKind::Return,
+            b"continue" => TokenKind::Continue,
+            b"for" => TokenKind::For,
+            b"switch" => TokenKind::Switch,
+            b"while" => TokenKind::While,
+            b"repeat" => TokenKind::Repeat,
+            b"function" => TokenKind::Function,
+            b"with" => TokenKind::With,
+            b"default" => TokenKind::Default,
+            b"if" => TokenKind::If,
+            b"then" => TokenKind::Then,
+            b"throw" => TokenKind::Throw,
+            b"delete" => TokenKind::Delete,
+            b"enum" => TokenKind::Enum,
+            b"constructor" => TokenKind::Constructor,
+            _ => TokenKind::Identifier,
+        }
+    }
+
+    fn lex_accessor(&mut self) {
+        debug_assert!(self.current() == b'[');
+
+        let start = self.cursor;
+        self.cursor += 1;
+        let kind = match self.current() {
+            b'|' => TokenKind::ListAccessor,
+            b'?' => TokenKind::MapAccessor,
+            b'#' => TokenKind::GridAccessor,
+            b'@' => TokenKind::ArrayAccessor,
+            b'$' => TokenKind::StructAccessor,
+            _ => TokenKind::BracketOpen,
+        };
+
+        if kind != TokenKind::BracketOpen {
+            self.cursor += 1;
         }
 
-        self.add_token_with_payload(TokenKind::Identifier, 0, start);
+        let token_index = self.add_token(kind, start);
+        self.handle_open_delimiter(token_index);
+    }
+
+    fn lex_less_than(&mut self) {
+        debug_assert!(self.current() == b'<');
+
+        let start = self.cursor;
+        self.cursor += 1;
+        match self.current() {
+            b'<' => {
+                self.cursor += 1;
+                self.lex_byte_and_equals(start, TokenKind::LeftShift, TokenKind::LeftShiftAssign);
+            }
+            b'=' => {
+                self.cursor += 1;
+                self.add_token(TokenKind::LessThanEquals, start);
+            }
+            _ => {
+                self.add_token(TokenKind::LessThan, start);
+            }
+        }
+    }
+
+    fn lex_greater_than(&mut self) {
+        debug_assert!(self.current() == b'>');
+
+        let start = self.cursor;
+        self.cursor += 1;
+        match self.current() {
+            b'>' => {
+                self.cursor += 1;
+                self.lex_byte_and_equals(start, TokenKind::RightShift, TokenKind::RightShiftAssign);
+            }
+            b'=' => {
+                self.cursor += 1;
+                self.add_token(TokenKind::GreaterThanEquals, start);
+            }
+            _ => {
+                self.add_token(TokenKind::GreaterThan, start);
+            }
+        }
+    }
+
+    fn lex_question(&mut self) {
+        let start = self.cursor;
+        self.cursor += 1;
+        match self.current() {
+            b'?' => {
+                self.cursor += 1;
+                self.lex_byte_and_equals(
+                    start,
+                    TokenKind::NullCoalesce,
+                    TokenKind::NullCoalesceAssign,
+                );
+            }
+            _ => {
+                self.add_token(TokenKind::GreaterThan, start);
+            }
+        }
     }
 
     fn lex_number_literal_or_dot(&mut self) {
@@ -591,7 +639,7 @@ impl<'a> Lexer<'a> {
             self.add_token(TokenKind::Dot, start);
             return;
         }
-        
+
         self.add_token_with_payload(kind, 0, start);
     }
 
@@ -625,7 +673,7 @@ impl<'a> Lexer<'a> {
 
     fn lex_template_string_or_hex_literal(&mut self) {
         debug_assert!(self.current() == b'$');
-        todo!();
+        todo!("lex template strings and hex literals");
     }
 
     fn lex_comment_or_divide(&mut self) {
@@ -656,7 +704,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
             }
-            _ => self.lex_common_start_symbol(),
+            _ => self.lex_byte_and_equals(start, TokenKind::Divide, TokenKind::DivideAssign),
         }
     }
 
@@ -666,7 +714,7 @@ impl<'a> Lexer<'a> {
 
         while self.cursor < self.text.len() {
             let c = self.current();
-            if is_identifier_char(c) || is_horizontal_whitespace(c) {
+            if is_identifier_byte(c) || is_horizontal_whitespace(c) {
                 break;
             }
             self.cursor += 1;

@@ -114,7 +114,7 @@ fn scan_identifier_scalar(text: &[u8], start: usize) -> usize {
     let mut i = start;
 
     while i < text.len() {
-        if !is_identifier_char(text[i]) {
+        if !is_identifier_byte(text[i]) {
             break;
         }
         i += 1;
@@ -124,7 +124,7 @@ fn scan_identifier_scalar(text: &[u8], start: usize) -> usize {
 }
 
 // todo: unicode lexing?
-pub const fn is_identifier_char(c: u8) -> bool {
+pub const fn is_identifier_byte(c: u8) -> bool {
     matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'0'..=b'9')
 }
 

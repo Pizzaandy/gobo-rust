@@ -1,8 +1,15 @@
 [package]
-name = "fiber-lang-rust"
+name = "gobo-rust"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-phf = "0.13.1"
-phf_macros = "0.13.1"
+[dev-dependencies]
+criterion = "0.8.1"
+
+[[bench]]
+name = "lexing"
+harness = false
+
+[profile.profiling]
+inherits = "release"
+debug = true

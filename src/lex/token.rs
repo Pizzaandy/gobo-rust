@@ -9,7 +9,6 @@ pub struct Token {
 }
 
 typed_index!(pub struct TokenIndex(u32));
-typed_index!(pub struct BiggerTokenIndex(u64));
 
 const _: () = {
     assert!(size_of::<Token>() == 8, "expected Token to be 8 bytes");
@@ -74,20 +73,19 @@ pub enum TokenKind {
     FileEnd,
     SingleLineComment,
     MultiLineComment,
-    OpenBracket,
+    BracketOpen,
+    BracketClose,
     ListAccessor,
     MapAccessor,
     GridAccessor,
     ArrayAccessor,
     StructAccessor,
-    CloseBracket,
-    OpenParen,
-    CloseParen,
-    OpenBrace,
-    CloseBrace,
+    ParenOpen,
+    ParenClose,
+    BraceOpen,
+    BraceClose,
     Semicolon,
     Comma,
-    Assign,
     Colon,
     Dot,
     PlusPlus,
@@ -123,7 +121,7 @@ pub enum TokenKind {
     DivideAssign,
     PlusAssign,
     MinusAssign,
-    ModulusAssign,
+    ModuloAssign,
     LeftShiftAssign,
     RightShiftAssign,
     BitAndAssign,
@@ -185,4 +183,44 @@ pub enum TokenKind {
     SimpleTemplateString,
     LineBreak,
     Whitespace,
+}
+
+impl TokenKind {
+    pub fn is_comment(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::SingleLineComment | TokenKind::MultiLineComment
+        )
+    }
+
+    pub fn is_assign_operator(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Equals
+                | TokenKind::MultiplyAssign
+                | TokenKind::DivideAssign
+                | TokenKind::PlusAssign
+                | TokenKind::MinusAssign
+                | TokenKind::ModuloAssign
+                | TokenKind::LeftShiftAssign
+                | TokenKind::RightShiftAssign
+                | TokenKind::BitAndAssign
+                | TokenKind::BitXorAssign
+                | TokenKind::BitOrAssign
+                | TokenKind::NullCoalesceAssign
+        )
+    }
+
+    pub fn is_prefix_operator(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Not
+                | TokenKind::BitNot
+                | TokenKind::PlusPlus
+                | TokenKind::MinusMinus
+                | TokenKind::New
+        )
+    }
 }
