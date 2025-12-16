@@ -1,10 +1,10 @@
 use crate::lex::identifier_lexer::*;
-use crate::lex::number_lexer::{scan_number_or_dot};
+use crate::lex::number_lexer::scan_number_or_dot;
 use crate::lex::string_lexer::{scan_string_literal, scan_verbatim_string_literal};
 use crate::lex::token::{Token, TokenIndex, TokenKind};
 use crate::lex::{Comment, Line, LineIndex, TokenizedText};
+use crate::parse::ParseDiagnostic;
 use crate::source_text::{SourceText, TextSize};
-use crate::parser::ParseDiagnostic;
 
 #[derive(Copy, Clone)]
 #[repr(u8)]
@@ -104,9 +104,9 @@ const fn is_horizontal_whitespace(c: u8) -> bool {
 const fn is_open_delimiter(kind: TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::ParenOpen
-            | TokenKind::BraceOpen
-            | TokenKind::BracketOpen
+        TokenKind::LeftParen
+            | TokenKind::LeftBrace
+            | TokenKind::LeftSquare
             | TokenKind::ArrayAccessor
             | TokenKind::ListAccessor
             | TokenKind::GridAccessor
@@ -118,7 +118,7 @@ const fn is_open_delimiter(kind: TokenKind) -> bool {
 const fn is_close_delimiter(kind: TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::ParenClose | TokenKind::BraceClose | TokenKind::BracketClose
+        TokenKind::RightParen | TokenKind::RightBrace | TokenKind::RightSquare
     )
 }
 
@@ -126,14 +126,14 @@ fn is_matching_delimiter(open_kind: TokenKind, close_kind: TokenKind) -> bool {
     debug_assert!(is_open_delimiter(open_kind));
     debug_assert!(is_close_delimiter(close_kind));
     match open_kind {
-        TokenKind::ParenOpen => close_kind == TokenKind::ParenClose,
-        TokenKind::BraceOpen => close_kind == TokenKind::BraceClose,
-        TokenKind::BracketOpen
+        TokenKind::LeftParen => close_kind == TokenKind::RightParen,
+        TokenKind::LeftBrace => close_kind == TokenKind::RightBrace,
+        TokenKind::LeftSquare
         | TokenKind::ArrayAccessor
         | TokenKind::ListAccessor
         | TokenKind::GridAccessor
         | TokenKind::MapAccessor
-        | TokenKind::StructAccessor => close_kind == TokenKind::BracketClose,
+        | TokenKind::StructAccessor => close_kind == TokenKind::RightSquare,
         _ => panic!("expected an open delimiter"),
     }
 }
@@ -173,10 +173,10 @@ impl<'a> Lexer<'a> {
 
         while self.cursor < self.text.len() {
             // dispatch table covers all possible u8 values
-            let byte_kind = unsafe {
+            let dispatch_kind = unsafe {
                 *DISPATCH_TABLE.get_unchecked(self.text.get_byte_unchecked(self.cursor) as usize)
             };
-            match byte_kind {
+            match dispatch_kind {
                 Dispatch::IdentifierStart => self.lex_keyword_or_identifier(),
                 Dispatch::Dot => self.lex_number_literal_or_dot(),
                 Dispatch::DigitZero => self.lex_number_literal_or_dot(),
@@ -191,11 +191,11 @@ impl<'a> Lexer<'a> {
                 Dispatch::Hash => todo!("hex literal + directives"),
 
                 Dispatch::BracketOpen => self.lex_accessor(),
-                Dispatch::BracketClose => self.lex_close_delimiter(TokenKind::BracketClose),
-                Dispatch::ParenOpen => self.lex_open_delimiter(TokenKind::ParenOpen),
-                Dispatch::ParenClose => self.lex_close_delimiter(TokenKind::ParenClose),
-                Dispatch::BraceOpen => self.lex_open_delimiter(TokenKind::BraceOpen),
-                Dispatch::BraceClose => self.lex_close_delimiter(TokenKind::BraceClose),
+                Dispatch::BracketClose => self.lex_close_delimiter(TokenKind::RightSquare),
+                Dispatch::ParenOpen => self.lex_open_delimiter(TokenKind::LeftParen),
+                Dispatch::ParenClose => self.lex_close_delimiter(TokenKind::RightParen),
+                Dispatch::BraceOpen => self.lex_open_delimiter(TokenKind::LeftBrace),
+                Dispatch::BraceClose => self.lex_close_delimiter(TokenKind::RightBrace),
 
                 Dispatch::Comma => self.lex_byte(TokenKind::Comma),
                 Dispatch::Colon => self.lex_byte(TokenKind::Colon),
@@ -259,17 +259,15 @@ impl<'a> Lexer<'a> {
 
         self.lex_file_end();
 
-        if self.output.tokens.len() >= Token::MAX_INDEX {
+        if self.output.token_count() >= Token::MAX_INDEX {
             todo!("report too many tokens");
         }
     }
 
-    #[inline(always)]
     fn add_token(&mut self, kind: TokenKind, start: TextSize) -> TokenIndex {
         Self::add_token_with_payload(self, kind, 0, start)
     }
 
-    #[inline(always)]
     fn add_token_with_payload(
         &mut self,
         kind: TokenKind,
@@ -278,15 +276,13 @@ impl<'a> Lexer<'a> {
     ) -> TokenIndex {
         let token = Token::new(kind, self.has_leading_space, payload, start);
         self.has_leading_space = false;
-        self.output.tokens.push(token)
+        self.output.add_token(token)
     }
 
-    #[inline(always)]
     fn current(&self) -> u8 {
         self.text.get_byte(self.cursor)
     }
 
-    #[inline(always)]
     fn peek(&self) -> u8 {
         if self.cursor + 1 < self.text.len() {
             self.text.get_byte(self.cursor + 1)
@@ -295,13 +291,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    #[inline]
     fn lex_byte(&mut self, kind: TokenKind) {
         self.add_token(kind, self.cursor);
         self.cursor += 1;
     }
 
-    #[inline]
     fn lex_open_delimiter(&mut self, kind: TokenKind) {
         debug_assert!(is_open_delimiter(kind));
         let token_index = self.add_token(kind, self.cursor);
@@ -309,7 +303,6 @@ impl<'a> Lexer<'a> {
         self.handle_open_delimiter(token_index);
     }
 
-    #[inline]
     fn lex_close_delimiter(&mut self, kind: TokenKind) {
         debug_assert!(is_close_delimiter(kind));
         let token_index = self.add_token(kind, self.cursor);
@@ -317,7 +310,6 @@ impl<'a> Lexer<'a> {
         self.handle_close_delimiter(token_index);
     }
 
-    #[inline]
     fn lex_byte_and_equals(&mut self, start: TextSize, kind: TokenKind, equals_kind: TokenKind) {
         if self.peek() == b'=' {
             self.cursor += 2;
@@ -328,7 +320,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    #[inline]
     fn lex_byte_twice_or_equals(
         &mut self,
         kind: TokenKind,
@@ -350,7 +341,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    #[inline]
     fn handle_open_delimiter(&mut self, open_token_index: TokenIndex) {
         self.open_delimiters.push(open_token_index);
     }
@@ -509,8 +499,8 @@ impl<'a> Lexer<'a> {
             b"not" => TokenKind::Not,
             b"mod" => TokenKind::Modulo,
             b"div" => TokenKind::IntegerDivide,
-            b"begin" => TokenKind::BraceOpen,
-            b"end" => TokenKind::BraceClose,
+            b"begin" => TokenKind::LeftBrace,
+            b"end" => TokenKind::RightBrace,
             b"true" => TokenKind::BooleanLiteral,
             b"false" => TokenKind::BooleanLiteral,
             b"break" => TokenKind::Break,
@@ -555,10 +545,10 @@ impl<'a> Lexer<'a> {
             b'#' => TokenKind::GridAccessor,
             b'@' => TokenKind::ArrayAccessor,
             b'$' => TokenKind::StructAccessor,
-            _ => TokenKind::BracketOpen,
+            _ => TokenKind::LeftSquare,
         };
 
-        if kind != TokenKind::BracketOpen {
+        if kind != TokenKind::LeftSquare {
             self.cursor += 1;
         }
 
@@ -683,8 +673,7 @@ impl<'a> Lexer<'a> {
         match self.peek() {
             b'/' => {
                 self.advance_to_next_line();
-                let id = self.output.comments.push(Comment::new(start, self.cursor));
-                self.add_token_with_payload(TokenKind::SingleLineComment, id.value(), start);
+                self.output.add_comment(Comment::new(start, self.cursor));
             }
             b'*' => {
                 self.cursor += 1;
@@ -698,8 +687,7 @@ impl<'a> Lexer<'a> {
                     }
                     if self.current() == b'/' {
                         self.cursor += 1;
-                        let id = self.output.comments.push(Comment::new(start, self.cursor));
-                        self.add_token_with_payload(TokenKind::MultiLineComment, id.value(), start);
+                        self.output.add_comment(Comment::new(start, self.cursor));
                         break;
                     }
                 }

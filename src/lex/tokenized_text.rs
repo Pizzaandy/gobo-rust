@@ -1,13 +1,14 @@
 use crate::chunked_index_vec::ChunkedIndexVec;
+use crate::lex::TokenKind;
 use crate::lex::token::{Token, TokenIndex};
-use crate::parser::ParseDiagnostic;
+use crate::parse::ParseDiagnostic;
 use crate::source_text::TextSize;
 use crate::typed_index;
 
 pub struct TokenizedText {
-    pub tokens: ChunkedIndexVec<Token, TokenIndex>,
-    pub comments: ChunkedIndexVec<Comment, CommentIndex>,
-    pub lines: ChunkedIndexVec<Line, LineIndex>,
+    pub(crate) tokens: ChunkedIndexVec<Token, TokenIndex>,
+    comments: ChunkedIndexVec<Comment, CommentIndex>,
+    pub(crate) lines: ChunkedIndexVec<Line, LineIndex>,
     pub diagnostics: Vec<ParseDiagnostic>,
     pub last_line_is_inserted: bool,
 }
@@ -21,6 +22,18 @@ impl TokenizedText {
             diagnostics: Vec::new(),
             last_line_is_inserted: false,
         }
+    }
+
+    pub fn add_token(&mut self, token: Token) -> TokenIndex {
+        self.tokens.push(token)
+    }
+
+    pub fn add_comment(&mut self, comment: Comment) -> CommentIndex {
+        self.comments.push(comment)
+    }
+
+    pub fn token_count(&self) -> usize {
+        self.tokens.len()
     }
 
     pub fn find_line_index(&self, position: TextSize) -> LineIndex {
@@ -64,6 +77,14 @@ impl TokenizedText {
 
     pub fn get_loc(&self, token: TokenIndex) -> (u32, u32) {
         (self.get_line_number(token), self.get_column_number(token))
+    }
+
+    pub fn get_kind(&self, token: TokenIndex) -> TokenKind {
+        self.tokens.get(token).kind()
+    }
+
+    pub fn get_start(&self, token: TokenIndex) -> TextSize {
+        self.tokens.get(token).start()
     }
 
     pub fn has_leading_whitespace(&self, token: TokenIndex) -> bool {

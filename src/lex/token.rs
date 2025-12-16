@@ -68,22 +68,22 @@ impl Debug for Token {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
-    Error = 0,
+    Error,
     FileStart,
     FileEnd,
     SingleLineComment,
     MultiLineComment,
-    BracketOpen,
-    BracketClose,
     ListAccessor,
     MapAccessor,
     GridAccessor,
     ArrayAccessor,
     StructAccessor,
-    ParenOpen,
-    ParenClose,
-    BraceOpen,
-    BraceClose,
+    LeftSquare,
+    RightSquare,
+    LeftParen,
+    RightParen,
+    LeftBrace,
+    RightBrace,
     Semicolon,
     Comma,
     Colon,
@@ -134,12 +134,8 @@ pub enum TokenKind {
     BooleanLiteral,
     IntegerLiteral,
     RealLiteral,
-    BinaryLiteral,
-    HexIntegerLiteral,
     StringLiteral,
     VerbatimStringLiteral,
-    Undefined,
-    Noone,
     Break,
     Exit,
     Do,
@@ -193,6 +189,16 @@ impl TokenKind {
         )
     }
 
+    pub fn is_comment_or_whitespace(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::SingleLineComment
+                | TokenKind::MultiLineComment
+                | TokenKind::Whitespace
+                | TokenKind::LineBreak
+        )
+    }
+
     pub fn is_assign_operator(&self) -> bool {
         matches!(
             self,
@@ -221,6 +227,73 @@ impl TokenKind {
                 | TokenKind::PlusPlus
                 | TokenKind::MinusMinus
                 | TokenKind::New
+        )
+    }
+
+    pub fn is_postfix_operator(&self) -> bool {
+        matches!(self, TokenKind::PlusPlus | TokenKind::MinusMinus)
+    }
+
+    pub fn is_binary_operator(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Equals
+                | TokenKind::Multiply
+                | TokenKind::Divide
+                | TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Modulo
+                | TokenKind::LeftShift
+                | TokenKind::RightShift
+                | TokenKind::BitAnd
+                | TokenKind::BitXor
+                | TokenKind::BitOr
+                | TokenKind::NullCoalesce
+        )
+    }
+
+    pub fn is_literal(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::BooleanLiteral
+                | TokenKind::IntegerLiteral
+                | TokenKind::RealLiteral
+                | TokenKind::StringLiteral
+                | TokenKind::VerbatimStringLiteral
+        )
+    }
+
+    pub fn is_control_flow_keyword(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::If
+                | TokenKind::Then
+                | TokenKind::Else
+                | TokenKind::Repeat
+                | TokenKind::Do
+                | TokenKind::While
+                | TokenKind::For
+                | TokenKind::Switch
+                | TokenKind::Case
+                | TokenKind::Default
+                | TokenKind::Catch
+                | TokenKind::Break
+                | TokenKind::Continue
+                | TokenKind::Return
+                | TokenKind::Throw
+                | TokenKind::Try
+                | TokenKind::With
+        )
+    }
+
+    pub fn is_decl_keyword(&self) -> bool {
+        matches!(
+            self,
+            TokenKind::Var
+                | TokenKind::Function
+                | TokenKind::GlobalVar
+                | TokenKind::Static
+                | TokenKind::Enum
         )
     }
 }

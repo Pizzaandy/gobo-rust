@@ -36,13 +36,13 @@ impl Default for Fnv1aHasher32 {
     }
 }
 
-impl std::hash::Hasher for Fnv1aHasher32 {
+impl Hasher for Fnv1aHasher32 {
     #[inline(always)]
     fn finish(&self) -> u64 {
         self.state as u64
     }
 
-    #[inline(never)]
+    #[inline(always)]
     fn write(&mut self, bytes: &[u8]) {
         let mut state = self.state;
         for &b in bytes {
